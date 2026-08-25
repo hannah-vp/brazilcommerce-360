@@ -1,0 +1,37 @@
+# Place at ~/.dbt/profiles.yml
+#
+# Credentials are read from environment variables so nothing secret is ever
+# committed. python-dotenv already loads .env for the ingestion script; for dbt,
+# either export these in your shell or use `dotenv run -- dbt build`.
+#
+# Two targets:
+#   dev  — your working database, used for every local run
+#   prod — built only by CI on merge to main
+
+olist:
+  target: dev
+  outputs:
+
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'transformer') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'ECOMMERCE_WH') }}"
+      database: ECOMMERCE_DEV
+      schema: dbt
+      threads: 4
+      client_session_keep_alive: false
+
+    prod:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'transformer') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'ECOMMERCE_WH') }}"
+      database: ECOMMERCE_PROD
+      schema: dbt
+      threads: 8
+      client_session_keep_alive: false

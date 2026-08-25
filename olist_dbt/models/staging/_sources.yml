@@ -1,0 +1,40 @@
+version: 2
+
+sources:
+  - name: raw
+    database: ECOMMERCE_DEV
+    schema: RAW
+    description: >
+      Olist tables as loaded by ingestion/load.py. All columns are VARCHAR and
+      source-faithful; casting happens in staging. Blank source cells are loaded
+      as NULL, so standard null tests apply.
+
+    tables:
+      - name: raw_orders
+        description: One row per order. Primary key order_id.
+      - name: raw_order_items
+        description: >
+          One row per ITEM within an order — 112,650 rows across 98,666 orders.
+          Not unique on order_id.
+      - name: raw_customers
+        description: >
+          One row per order-customer record. customer_id is issued per order;
+          customer_unique_id identifies the person.
+      - name: raw_products
+        description: One row per product. Source misspells the two *_lenght columns.
+      - name: raw_sellers
+        description: One row per seller.
+      - name: raw_order_payments
+        description: One row per payment. Orders may have several (split payments).
+      - name: raw_order_reviews
+        description: >
+          One row per review. Contains 814 duplicate review_id values that
+          staging deduplicates.
+      - name: raw_geolocation
+        description: >
+          GPS points by zip prefix — ~53 rows per zip. Must be collapsed before
+          joining or it fans out downstream row counts.
+      - name: raw_product_category_translation
+        description: >
+          Portuguese to English category lookup. Covers 71 of the 73 categories
+          present in raw_products.

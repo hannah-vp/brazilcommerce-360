@@ -1,0 +1,170 @@
+version: 2
+
+models:
+
+  - name: fact_orders
+    description: >
+      Core fact table. GRAIN: one row per order item, keyed on
+      (order_id, order_item_seq). order_id repeats for multi-item orders, so
+      order counts must use count(distinct order_id).
+    config:
+      contract:
+        enforced: true
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - order_id
+            - order_item_seq
+    columns:
+      - name: order_id
+        data_type: varchar
+        description: Foreign key to stg_orders. Not unique at this grain.
+        constraints:
+          - type: not_null
+      - name: order_item_seq
+        data_type: number
+        description: Item sequence within the order.
+        constraints:
+          - type: not_null
+      - name: product_id
+        data_type: varchar
+      - name: seller_id
+        data_type: varchar
+      - name: customer_id
+        data_type: varchar
+      - name: category_name_en
+        data_type: varchar
+      - name: order_status
+        data_type: varchar
+      - name: purchased_at
+        data_type: timestamp_ntz
+      - name: delivered_at
+        data_type: timestamp_ntz
+      - name: estimated_delivery_at
+        data_type: timestamp_ntz
+      - name: delivery_days
+        data_type: number
+        description: Purchase to arrival in days. NULL when undelivered.
+      - name: days_vs_promise
+        data_type: number
+        description: Positive when early, negative when late.
+      - name: is_late_vs_promise
+        data_type: boolean
+      - name: item_price
+        data_type: number(10,2)
+        description: Item price in BRL, excluding freight.
+      - name: freight_value
+        data_type: number(10,2)
+      - name: item_total
+        data_type: number(11,2)
+      - name: freight_ratio
+        data_type: number(38,4)
+        description: freight_value / item_price. The margin lens.
+
+  - name: dim_customers
+    description: >
+      Customer dimension at PERSON grain, keyed on customer_unique_id
+      (note 4). Location taken from the most recent order.
+    columns:
+      - name: customer_unique_id
+        description: Primary key — the actual person.
+        tests:
+          - unique
+          - not_null
+      - name: lifetime_orders
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+      - name: is_repeat_customer
+        description: TRUE when the person placed two or more orders.
+        tests:
+          - not_null
+      - name: customer_state
+        tests:
+          - not_null
+
+  - name: dim_products
+    description: Product dimension with volumetric context for freight analysis.
+    columns:
+      - name: product_id
+        tests:
+          - unique
+          - not_null
+      - name: category_name_en
+        tests:
+          - not_null
+
+  - name: dim_sellers
+    description: Seller dimension with coordinates joined from stg_geolocation.
+    columns:
+      - name: seller_id
+        tests:
+          - unique
+          - not_null
+      - name: seller_state
+        tests:
+          - not_null
+
+
+# ---------------------------------------------------------------------------
+# Unit tests
+#
+# dbt tests validate DATA. Unit tests validate LOGIC — that a transformation
+# produces the expected output for a known input, independent of what is
+# currently in the warehouse. These run in dbt build without touching real rows.
+# ---------------------------------------------------------------------------
+
+unit_tests:
+
+  - name: test_late_flag_and_freight_ratio
+    description: >
+      Verifies the two derived columns in fact_orders: is_late_vs_promise fires
+      only when delivery is after the estimate, and freight_ratio divides
+      correctly. Also checks that an undelivered order yields NULL rather than
+      FALSE, since "not yet delivered" is not the same as "on time".
+    model: fact_orders
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+
+      - input: ref('stg_order_items')
+        rows:
+          - {order_id: 'A', order_item_seq: 1, product_id: 'P1', seller_id: 'S1',
+             item_price: 100.00, freight_value: 25.00, item_total: 125.00}
+          - {order_id: 'B', order_item_seq: 1, product_id: 'P1', seller_id: 'S1',
+             item_price: 200.00, freight_value: 20.00, item_total: 220.00}
+          - {order_id: 'C', order_item_seq: 1, product_id: 'P1', seller_id: 'S1',
+             item_price: 50.00,  freight_value: 5.00,  item_total: 55.00}
+
+      - input: ref('stg_orders')
+        rows:
+          # arrived after the promised date -> late
+          - {order_id: 'A', customer_id: 'C1', order_status: 'delivered',
+             purchased_at: '2018-01-01 00:00:00',
+             delivered_at: '2018-01-20 00:00:00',
+             estimated_delivery_at: '2018-01-15 00:00:00',
+             delivery_days: 19, days_vs_promise: -5, is_late_vs_promise: true}
+          # arrived before the promised date -> on time
+          - {order_id: 'B', customer_id: 'C2', order_status: 'delivered',
+             purchased_at: '2018-01-01 00:00:00',
+             delivered_at: '2018-01-10 00:00:00',
+             estimated_delivery_at: '2018-01-15 00:00:00',
+             delivery_days: 9, days_vs_promise: 5, is_late_vs_promise: false}
+          # never delivered -> NULL, not false
+          - {order_id: 'C', customer_id: 'C3', order_status: 'canceled',
+             purchased_at: '2018-01-01 00:00:00',
+             delivered_at: null,
+             estimated_delivery_at: '2018-01-15 00:00:00',
+             delivery_days: null, days_vs_promise: null, is_late_vs_promise: null}
+
+      - input: ref('stg_products')
+        rows:
+          - {product_id: 'P1', category_name_en: 'toys'}
+
+    expect:
+      rows:
+        - {order_id: 'A', is_late_vs_promise: true,  freight_ratio: 0.2500}
+        - {order_id: 'B', is_late_vs_promise: false, freight_ratio: 0.1000}
+        - {order_id: 'C', is_late_vs_promise: null,  freight_ratio: 0.1000}
