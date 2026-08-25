@@ -1,0 +1,44 @@
+{
+  "trained_at": "2026-08-25T19:03:42+00:00",
+  "n_rows_total": 95601,
+  "n_rows_train": 71700,
+  "n_rows_test": 23901,
+  "baseline_bad_review_rate": 0.1276,
+  "test_roc_auc": 0.6838,
+  "test_avg_precision": 0.3875,
+  "features": [
+    "delivery_days",
+    "is_late",
+    "days_late",
+    "freight_ratio"
+  ],
+  "coefficients": {
+    "delivery_days": 0.0379,
+    "is_late": 1.2506,
+    "days_late": 0.0701,
+    "freight_ratio": 0.0873
+  },
+  "odds_ratios": {
+    "delivery_days": 1.039,
+    "is_late": 3.492,
+    "days_late": 1.073,
+    "freight_ratio": 1.091
+  },
+  "bucket_calibration": [
+    {
+      "risk_bucket": "Medium",
+      "orders": 49445,
+      "actual_bad_rate": 7.9
+    },
+    {
+      "risk_bucket": "High",
+      "orders": 37981,
+      "actual_bad_rate": 10.7
+    },
+    {
+      "risk_bucket": "Very High",
+      "orders": 8175,
+      "actual_bad_rate": 52.0
+    }
+  ]
+}
