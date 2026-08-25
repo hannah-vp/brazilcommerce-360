@@ -1,0 +1,194 @@
+version: 2
+
+models:
+
+  - name: mart_retention
+    description: >
+      Finding 1 — order-frequency distribution at person grain, showing that
+      the business runs on acquisition rather than repeat purchase.
+    columns:
+      - name: order_frequency
+        tests:
+          - unique
+          - not_null
+          - accepted_values:
+              values: ['1 order', '2 orders', '3+ orders']
+      - name: pct_of_customers
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 100
+
+  - name: mart_delivery_satisfaction
+    description: >
+      Finding 2 — review score by delivery speed and by whether the promised
+      date was met. Two lenses in one table, selected with the lens column.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - lens
+            - bucket
+    columns:
+      - name: lens
+        description: Either 'speed' or 'promise'.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['speed', 'promise']
+      - name: bucket
+        tests:
+          - not_null
+      - name: avg_review_score
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 5
+      - name: pct_bad_review
+        description: Share of orders in the bucket scoring 1 or 2.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 100
+
+  - name: mart_freight_burden
+    description: >
+      Finding 3 — freight as a percentage of item price by category, revealing
+      the margin picture that revenue rankings hide.
+    columns:
+      - name: category_name_en
+        tests:
+          - unique
+          - not_null
+      - name: items_sold
+        description: Minimum 100, enforced by the HAVING clause in the model.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 100
+      - name: freight_pct_of_price
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+
+  - name: mart_review_distribution
+    description: >
+      Finding 4 — the bimodal review distribution that makes the mean score a
+      misleading KPI.
+    columns:
+      - name: review_score
+        tests:
+          - unique
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5]
+              quote: false
+      - name: pct_of_reviews
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 100
+
+  - name: mart_geographic_chain
+    description: >
+      Finding 5 — supply, demand, delivery time and satisfaction per state,
+      showing the causal chain from seller concentration to low ratings.
+    columns:
+      - name: state
+        tests:
+          - unique
+          - not_null
+      - name: avg_delivery_days
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 200
+      - name: avg_review_score
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 5
+
+  - name: mart_customer_segments
+    description: >
+      Pareto value tiers at person grain. Reframes the low repeat rate by
+      showing how concentrated spend is among the top decile.
+    columns:
+      - name: value_tier
+        tests:
+          - unique
+          - not_null
+          - accepted_values:
+              values: ['Top 1%', 'Top 10%', 'Next 40%', 'Bottom 50%']
+      - name: pct_of_revenue
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 100
+
+  - name: mart_review_risk
+    description: >
+      Per-order bad-review risk score. SQL companion to the fitted model in
+      analysis/risk_model.py, so the dashboard can serve risk without loading a
+      model artefact.
+    columns:
+      - name: order_id
+        tests:
+          - unique
+          - not_null
+      - name: risk_score
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 5
+      - name: risk_bucket
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Low', 'Medium', 'High', 'Very High']
+
+
+# ---------------------------------------------------------------------------
+# Unit test — bucketing logic
+#
+# Verifies that delivery days land in the correct bucket, including the exact
+# boundary values where off-by-one errors hide.
+# ---------------------------------------------------------------------------
+
+unit_tests:
+
+  - name: test_delivery_speed_buckets
+    description: >
+      Checks the delivery-speed bucketing at each boundary (7, 14, 21 days) and
+      beyond, so a change to the CASE thresholds cannot pass silently.
+    model: mart_delivery_satisfaction
+    given:
+
+      - input: ref('fact_orders')
+        rows:
+          - {order_id: 'A', order_status: 'delivered', delivery_days: 7,
+             is_late_vs_promise: false, days_vs_promise: 3}
+          - {order_id: 'B', order_status: 'delivered', delivery_days: 14,
+             is_late_vs_promise: false, days_vs_promise: 1}
+          - {order_id: 'C', order_status: 'delivered', delivery_days: 21,
+             is_late_vs_promise: false, days_vs_promise: 0}
+          - {order_id: 'D', order_status: 'delivered', delivery_days: 22,
+             is_late_vs_promise: true,  days_vs_promise: -2}
+
+      - input: ref('stg_order_reviews')
+        rows:
+          - {order_id: 'A', review_id: 'R1', review_score: 5}
+          - {order_id: 'B', review_id: 'R2', review_score: 4}
+          - {order_id: 'C', review_id: 'R3', review_score: 3}
+          - {order_id: 'D', review_id: 'R4', review_score: 1}
+
+    expect:
+      rows:
+        - {lens: 'speed',   bucket: '1-7 days',   orders: 1, avg_review_score: 5.00}
+        - {lens: 'speed',   bucket: '8-14 days',  orders: 1, avg_review_score: 4.00}
+        - {lens: 'speed',   bucket: '15-21 days', orders: 1, avg_review_score: 3.00}
+        - {lens: 'speed',   bucket: '22+ days',   orders: 1, avg_review_score: 1.00}
+        - {lens: 'promise', bucket: 'On time or early', orders: 3, avg_review_score: 4.00}
+        - {lens: 'promise', bucket: 'Late vs promise',  orders: 1, avg_review_score: 1.00}

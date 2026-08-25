@@ -1,0 +1,229 @@
+version: 2
+
+models:
+
+  - name: stg_orders
+    description: >
+      One row per order, typed, with derived delivery metrics. Delivery
+      timestamps are NULL for orders never delivered (data quality note 2) —
+      preserved rather than imputed.
+    columns:
+      - name: order_id
+        description: Primary key.
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: Per-order customer key. Joins to stg_customers.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_customers')
+              field: customer_id
+      - name: order_status
+        description: Fulfilment stage. Eight legitimate values (note 6).
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - delivered
+                - shipped
+                - canceled
+                - unavailable
+                - invoiced
+                - processing
+                - created
+                - approved
+      - name: purchased_at
+        description: When the order was placed.
+        tests:
+          - not_null
+      - name: delivery_days
+        description: Days from purchase to arrival. NULL when undelivered.
+      - name: is_late_vs_promise
+        description: >
+          TRUE when the order arrived after its estimated delivery date.
+          NULL when undelivered.
+
+  - name: stg_order_items
+    description: >
+      One row per item within an order. GRAIN WARNING (note 3): 112,650 rows
+      across 98,666 orders. order_id is not unique. Count orders with
+      count(distinct order_id).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - order_id
+            - order_item_seq
+    columns:
+      - name: order_id
+        description: Foreign key to stg_orders. Repeats for multi-item orders.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_orders')
+              field: order_id
+      - name: order_item_seq
+        description: Sequence number of the item within its order.
+        tests:
+          - not_null
+      - name: product_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_products')
+              field: product_id
+      - name: seller_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_sellers')
+              field: seller_id
+      - name: item_price
+        description: Price of this item in BRL, excluding freight.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              strictly: true
+      - name: freight_value
+        description: Shipping cost attributed to this item.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+
+  - name: stg_customers
+    description: >
+      One row per order-customer record. customer_id is per-order;
+      customer_unique_id is the person (note 4).
+    columns:
+      - name: customer_id
+        description: Per-order key. Unique in this table.
+        tests:
+          - unique
+          - not_null
+      - name: customer_unique_id
+        description: >
+          Identifies the actual person across orders. 96,096 distinct values
+          against 99,441 customer_ids. Use this for any person-level analysis.
+        tests:
+          - not_null
+      - name: customer_state
+        description: Two-letter Brazilian state code.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_value_lengths_to_equal:
+              value: 2
+
+  - name: stg_products
+    description: >
+      One row per product. English category resolved with a fallback chain
+      (note 7); misspelled source columns corrected (note 8).
+    columns:
+      - name: product_id
+        tests:
+          - unique
+          - not_null
+      - name: category_name_en
+        description: >
+          English category, falling back to the Portuguese name and then
+          'unknown' so no product is dropped from category analysis.
+        tests:
+          - not_null
+      - name: weight_g
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              row_condition: "weight_g is not null"
+
+  - name: stg_sellers
+    description: One row per seller. Clean source, no transformations needed.
+    columns:
+      - name: seller_id
+        tests:
+          - unique
+          - not_null
+      - name: seller_state
+        tests:
+          - not_null
+
+  - name: stg_order_payments
+    description: >
+      One row per payment. Orders may have several rows (split payments).
+      'not_defined' remapped to 'unknown' (note 5).
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_orders')
+              field: order_id
+      - name: payment_type
+        description: Payment method. Closed set enforced below.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['credit_card', 'boleto', 'voucher', 'debit_card', 'unknown']
+      - name: payment_value
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+
+  - name: stg_order_reviews
+    description: >
+      One row per review, deduplicated on review_id (note 9). Reviews created
+      before delivery are retained deliberately (note 11).
+    columns:
+      - name: review_id
+        description: Primary key after deduplication.
+        tests:
+          - unique
+          - not_null
+      - name: order_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_orders')
+              field: order_id
+      - name: review_score
+        description: Customer rating, 1 to 5.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5]
+              quote: false
+
+  - name: stg_geolocation
+    description: >
+      One row per zip prefix. Collapsed from ~53 source points per zip to
+      prevent join fan-out (note 10).
+    columns:
+      - name: zip_prefix
+        description: Primary key after collapsing.
+        tests:
+          - unique
+          - not_null
+      - name: latitude
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: -33.75
+              max_value: 5.27
+      - name: longitude
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: -73.99
+              max_value: -34.79
+
+  - name: stg_category_translation
+    description: Portuguese to English category lookup.
+    columns:
+      - name: category_name_pt
+        tests:
+          - unique
+          - not_null
+      - name: category_name_en
+        tests:
+          - unique
+          - not_null
