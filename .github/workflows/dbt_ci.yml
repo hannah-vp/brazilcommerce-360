@@ -1,0 +1,97 @@
+name: dbt CI
+
+# Every pull request that touches the dbt project is built and tested against an
+# isolated Snowflake schema before it can merge. A failing model or test blocks
+# the merge, so broken SQL never reaches main.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'olist_dbt/**'
+      - '.github/workflows/dbt_ci.yml'
+  workflow_dispatch:        # allows a manual run from the Actions tab
+
+concurrency:
+  # cancel an in-flight run when new commits are pushed to the same PR
+  group: dbt-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build and test
+    runs-on: ubuntu-latest
+
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_ROLE: transformer
+      SNOWFLAKE_WAREHOUSE: ECOMMERCE_WH
+      # each PR builds into its own schema so concurrent runs cannot collide
+      DBT_CI_SCHEMA: ci_pr_${{ github.event.pull_request.number || 'manual' }}
+
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-dbt-1.9
+
+      - name: Install dbt
+        run: pip install "dbt-core==1.9.*" "dbt-snowflake==1.9.*"
+
+      - name: Write CI profile
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<'PROFILE'
+          olist:
+            target: ci
+            outputs:
+              ci:
+                type: snowflake
+                account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+                user: "{{ env_var('SNOWFLAKE_USER') }}"
+                password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+                role: "{{ env_var('SNOWFLAKE_ROLE') }}"
+                warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE') }}"
+                database: ECOMMERCE_DEV
+                schema: "{{ env_var('DBT_CI_SCHEMA') }}"
+                threads: 4
+          PROFILE
+
+      - name: Install packages
+        working-directory: olist_dbt
+        run: dbt deps
+
+      - name: Validate project parses
+        working-directory: olist_dbt
+        run: dbt parse
+
+      - name: Build models and run tests
+        working-directory: olist_dbt
+        run: dbt build --target ci
+
+      - name: Upload run artifacts
+        if: always()          # keep the logs even when the build fails
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-target
+          path: olist_dbt/target/
+          retention-days: 7
+
+      - name: Drop the CI schema
+        if: always()          # clean up whether the build passed or failed
+        working-directory: olist_dbt
+        run: |
+          dbt run-operation drop_ci_schema \
+            --args "{schema_name: $DBT_CI_SCHEMA}" \
+            --target ci
