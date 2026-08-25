@@ -3,7 +3,7 @@
 *.p8
 *.pub
 *.pem
-.streamlit/secrets.toml
+**/secrets.toml
 
 # ---- data: too large, and reproducible from source ----
 data/
