@@ -1,6 +1,7 @@
 """
-BrazilCommerce 360 — Phase 1 ingestion
-Loads the 9 Olist CSVs into Snowflake RAW with vectorised schema validation.
+Olist CSV ingestion into Snowflake RAW.
+
+Loads nine source files with vectorised schema validation.
 Rows failing validation are written to <TABLE>_QUARANTINE rather than dropped.
 
 Design decisions (stated deliberately for review):

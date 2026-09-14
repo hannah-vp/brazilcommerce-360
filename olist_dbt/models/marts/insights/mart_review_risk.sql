@@ -8,7 +8,7 @@
 -- Weights mirror the fitted model's ranking: lateness dominates, with slow
 -- delivery and high freight burden as secondary signals.
 --
--- Deduplicated to order grain first (note 3).
+-- Deduplicated to order grain first .
 
 with order_level as (
 

@@ -1,8 +1,7 @@
 -- Singular test: no order item may reference an order that does not exist.
 --
--- This is the automated form of the orphan check run manually in Phase 2
--- (which returned 0). Encoding it here means the check runs on every build
--- rather than once.
+-- Referential integrity between the two largest tables. Encoded as a test so
+-- the check runs on every build rather than once.
 --
 -- dbt expects zero rows returned. Any row is a failure.
 

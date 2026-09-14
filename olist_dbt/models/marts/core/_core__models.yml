@@ -64,7 +64,7 @@ models:
   - name: dim_customers
     description: >
       Customer dimension at PERSON grain, keyed on customer_unique_id
-      (note 4). Location taken from the most recent order.
+      . Location taken from the most recent order.
     columns:
       - name: customer_unique_id
         description: Primary key — the actual person.
@@ -124,9 +124,6 @@ unit_tests:
       correctly. Also checks that an undelivered order yields NULL rather than
       FALSE, since "not yet delivered" is not the same as "on time".
     model: fact_orders
-    overrides:
-      macros:
-        is_incremental: false
     given:
 
       - input: ref('stg_order_items')

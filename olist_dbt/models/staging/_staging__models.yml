@@ -5,7 +5,7 @@ models:
   - name: stg_orders
     description: >
       One row per order, typed, with derived delivery metrics. Delivery
-      timestamps are NULL for orders never delivered (data quality note 2) —
+      timestamps are NULL for orders never delivered —
       preserved rather than imputed.
     columns:
       - name: order_id
@@ -21,7 +21,7 @@ models:
               to: ref('stg_customers')
               field: customer_id
       - name: order_status
-        description: Fulfilment stage. Eight legitimate values (note 6).
+        description: Fulfilment stage. Eight legitimate values .
         tests:
           - not_null
           - accepted_values:
@@ -47,7 +47,7 @@ models:
 
   - name: stg_order_items
     description: >
-      One row per item within an order. GRAIN WARNING (note 3): 112,650 rows
+      One row per item within an order. GRAIN WARNING : 112,650 rows
       across 98,666 orders. order_id is not unique. Count orders with
       count(distinct order_id).
     tests:
@@ -96,7 +96,7 @@ models:
   - name: stg_customers
     description: >
       One row per order-customer record. customer_id is per-order;
-      customer_unique_id is the person (note 4).
+      customer_unique_id is the person .
     columns:
       - name: customer_id
         description: Per-order key. Unique in this table.
@@ -119,7 +119,7 @@ models:
   - name: stg_products
     description: >
       One row per product. English category resolved with a fallback chain
-      (note 7); misspelled source columns corrected (note 8).
+      ; misspelled source columns corrected .
     columns:
       - name: product_id
         tests:
@@ -151,7 +151,7 @@ models:
   - name: stg_order_payments
     description: >
       One row per payment. Orders may have several rows (split payments).
-      'not_defined' remapped to 'unknown' (note 5).
+      'not_defined' remapped to 'unknown' .
     columns:
       - name: order_id
         tests:
@@ -173,8 +173,8 @@ models:
 
   - name: stg_order_reviews
     description: >
-      One row per review, deduplicated on review_id (note 9). Reviews created
-      before delivery are retained deliberately (note 11).
+      One row per review, deduplicated on review_id . Reviews created
+      before delivery are retained deliberately .
     columns:
       - name: review_id
         description: Primary key after deduplication.
@@ -198,7 +198,7 @@ models:
   - name: stg_geolocation
     description: >
       One row per zip prefix. Collapsed from ~53 source points per zip to
-      prevent join fan-out (note 10).
+      prevent join fan-out .
     columns:
       - name: zip_prefix
         description: Primary key after collapsing.

@@ -1,6 +1,6 @@
 -- One row per zip prefix.
 --
--- Data quality note 10: the source holds 1,000,163 GPS points across only
+-- the source holds 1,000,163 GPS points across only
 -- 19,015 zip prefixes — roughly 53 rows per zip, because a postcode covers an
 -- area. Joining the source directly on zip multiplies every joined row ~53x and
 -- corrupts all downstream counts and sums.

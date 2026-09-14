@@ -2,8 +2,7 @@
     config(
         materialized = 'incremental',
         unique_key   = ['order_id', 'order_item_seq'],
-        cluster_by   = ["date_trunc('month', purchased_at)"],
-	on_schema_change = 'fail'
+        cluster_by   = ["date_trunc('month', purchased_at)"]
     )
 }}
 
@@ -13,7 +12,7 @@
 -- granular level available and preserves every relationship; aggregate up, never
 -- disaggregate down. Because order_id repeats, order counts must use
 -- count(distinct order_id) and order-level averages must aggregate to order
--- level first (data quality note 3).
+-- level first.
 --
 -- Incremental so that re-runs process only new orders rather than rebuilding
 -- all 112,650 rows.

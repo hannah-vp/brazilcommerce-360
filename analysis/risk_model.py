@@ -1,5 +1,5 @@
 """
-BrazilCommerce 360 — Phase 4: bad-review risk model
+Bad-review risk model.
 
 Predicts whether an order will receive a 1 or 2 star review, using features
 available at delivery time. The point is not maximum accuracy — it is an

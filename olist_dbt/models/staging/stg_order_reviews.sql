@@ -1,10 +1,10 @@
 -- One row per review, deduplicated.
 --
--- Data quality note 9: the source contains 814 duplicate review_id values, some
+-- the source contains 814 duplicate review_id values, some
 -- appearing three times, despite review_id being the intended primary key. The
 -- most recent row per review_id is kept.
 --
--- Data quality note 11: 8,320 reviews were created before the order was
+-- 8,320 reviews were created before the order was
 -- delivered. This is expected behaviour — Olist requests the review at dispatch
 -- rather than on arrival — so those rows are kept and flagged rather than
 -- filtered.

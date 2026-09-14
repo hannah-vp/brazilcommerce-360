@@ -1,6 +1,6 @@
 -- Seller dimension, enriched with coordinates for the geography analysis.
 --
--- stg_geolocation is already one row per zip (note 10), so this join cannot
+-- stg_geolocation is already one row per zip , so this join cannot
 -- fan out.
 
 with sellers as (

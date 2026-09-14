@@ -4,7 +4,7 @@
 -- distant states wait longer and rate lower. This model puts supply, demand,
 -- delivery time and satisfaction in one row per state so the chain is visible.
 --
--- Deduplicated to order grain before joining reviews (note 3).
+-- Deduplicated to order grain before joining reviews .
 
 with delivered_orders as (
 

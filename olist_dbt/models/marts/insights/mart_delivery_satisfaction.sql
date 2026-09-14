@@ -7,7 +7,7 @@
 --
 -- Restricted to delivered orders with a review. Deduplicated to order grain
 -- first: fact_orders is order-item grain, so joining reviews directly would
--- count a multi-item order's review several times (note 3).
+-- count a multi-item order's review several times .
 
 with delivered_orders as (
 

@@ -1,12 +1,12 @@
 -- One row per product, with the English category name resolved.
 --
--- Data quality note 7: two categories (pc_gamer,
+-- two categories (pc_gamer,
 -- portateis_cozinha_e_preparadores_de_alimentos) have no English translation,
 -- and 610 products have no category at all. The coalesce below falls back to
 -- the Portuguese name, then to 'unknown', so no product is dropped from
 -- category analysis.
 --
--- Data quality note 8: the source misspells "length" as "lenght" in two column
+-- the source misspells "length" as "lenght" in two column
 -- names. Corrected here; RAW keeps the original spelling.
 
 with products as (

@@ -1,4 +1,3 @@
--- ci test
 -- One row per seller. Clean source: 3,095 rows, unique key, no missing values.
 --
 -- Note for the geography analysis: sellers span 23 states while customers span

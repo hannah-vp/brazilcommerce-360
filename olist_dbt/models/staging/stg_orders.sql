@@ -1,7 +1,7 @@
 -- One row per order. Casts the VARCHAR source columns and derives the
 -- delivery metrics used throughout the marts.
 --
--- Data quality note 2: delivery timestamps are NULL for orders that were never
+-- delivery timestamps are NULL for orders that were never
 -- delivered. Those NULLs are preserved rather than imputed; downstream models
 -- filter on order_status instead.
 

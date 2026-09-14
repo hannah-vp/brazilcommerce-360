@@ -1,6 +1,6 @@
 -- One row per order-customer record.
 --
--- Data quality note 4: customer_id is issued per ORDER, not per person.
+-- customer_id is issued per ORDER, not per person.
 -- customer_unique_id is the person. 99,441 customer_ids map to 96,096 people.
 -- Any retention, lifetime-value or segmentation logic must group on
 -- customer_unique_id or it will report a repeat rate of zero.

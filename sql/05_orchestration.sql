@@ -1,5 +1,5 @@
 -- ============================================================
--- BrazilCommerce 360 — Phase 5: orchestration
+-- Pipeline orchestration: scheduled task DAG with run logging.
 --
 -- Chains the in-warehouse steps as a Snowflake Task DAG. A child task runs only
 -- if its parent succeeded, so a failed load cannot propagate partial data into
@@ -61,9 +61,9 @@ AS
 -- ------------------------------------------------------------
 -- 3. Child task — referential integrity gate
 --
--- The automated form of the orphan check first run by hand in Phase 2. It has
--- now been a manual query, a dbt test, and a scheduled gate: the same check at
--- three levels of automation.
+-- Referential integrity gate. The same rule is enforced as a dbt test during
+-- the build; repeating it here catches corruption introduced after the build,
+-- and records the result in the run log.
 -- ------------------------------------------------------------
 CREATE OR REPLACE TASK task_quality_gate
     WAREHOUSE = ECOMMERCE_WH

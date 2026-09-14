@@ -1,5 +1,5 @@
 -- ============================================================
--- BrazilCommerce 360 — Phase 5: cost observability
+-- Warehouse cost observability.
 --
 -- A pipeline's own cost should be a monitored metric, not a surprise at the end
 -- of the month. These queries expose credit consumption and the queries driving

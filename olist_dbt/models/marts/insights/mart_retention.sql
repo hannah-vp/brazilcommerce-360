@@ -1,8 +1,7 @@
 -- FINDING 1: this is an acquisition business, not a retention one.
 --
 -- Grouped on customer_unique_id (the person), not customer_id (the order).
--- Using customer_id here would return a repeat rate of zero — see data quality
--- note 4.
+-- Using customer_id here would return a repeat rate of zero.
 
 with customers as (
 

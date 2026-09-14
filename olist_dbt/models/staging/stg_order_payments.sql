@@ -1,7 +1,7 @@
 -- One row per payment. An order may have several rows (split payments), so
 -- 103,886 rows cover 99,440 orders. Sum to order level before joining.
 --
--- Data quality note 5: payment_type contains three rows of 'not_defined',
+-- payment_type contains three rows of 'not_defined',
 -- a placeholder rather than a payment method. Mapped to 'unknown' so the
 -- accepted_values test can enforce a closed set.
 

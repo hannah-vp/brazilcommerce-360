@@ -1,6 +1,6 @@
 -- One row per ITEM within an order.
 --
--- Data quality note 3 (the grain trap): this table holds 112,650 rows across
+-- GRAIN WARNING: this table holds 112,650 rows across
 -- only 98,666 orders. order_id is NOT unique here. Anything counting orders
 -- must use count(distinct order_id), and order-level averages must aggregate
 -- to order level first. The composite key is (order_id, order_item_id).

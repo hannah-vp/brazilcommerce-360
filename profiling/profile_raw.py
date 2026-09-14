@@ -1,10 +1,9 @@
 """
-BrazilCommerce 360 — Phase 2: automated profiling
+Automated profiling of the RAW layer.
 
-Generates one HTML profile per RAW table. This is the first pass of data
-diagnosis: it computes completeness, cardinality, distributions, and
-correlations for every column at once, so the targeted SQL checks that follow
-only have to answer the questions the profile raises.
+Generates one HTML report per source table covering completeness, cardinality,
+distributions and correlations for every column, so the targeted SQL checks
+only have to answer what a single-table profiler cannot.
 
 Why automated profiling rather than hand-written SQL:
   * one command covers every column, so nothing is silently skipped
@@ -132,11 +131,6 @@ def main() -> None:
 
     print(f"{'-' * 64}")
     print(f"Reports written to {OUTPUT_DIR}\n")
-    print("Open each HTML file and note:")
-    print("  * columns with unexpected missing counts")
-    print("  * primary keys whose distinct count is below the row count")
-    print("  * categorical columns with more distinct values than expected")
-    print("Then run sql/02_final_checks.sql for the cross-table questions.\n")
 
 
 if __name__ == "__main__":
