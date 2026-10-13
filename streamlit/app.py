@@ -6,17 +6,34 @@ is tested and version-controlled; this file only presents. Each chart carries a
 caption stating the takeaway and the action, because a chart without a "so what"
 is decoration.
 
+Two data sources, one set of charts:
+
+  * Snowflake, when [snowflake] credentials are present. The queries below are
+    what runs, and they read the dbt marts directly.
+  * A committed CSV snapshot of those same marts otherwise, so the public
+    deployment works without exposing warehouse credentials.
+
+The snapshot is REGENERATED from the raw data by the same logic as the dbt
+models, not exported from Snowflake. `data/marts/README.md` records where the
+two disagree. The header states which source is in use, because a dashboard
+that quietly serves stale figures as live ones is worse than one that admits
+what it is reading.
+
 Run locally:
     streamlit run streamlit/app.py
 
 Deploy:
-    push to GitHub, connect the repo at share.streamlit.io, and paste the
-    [snowflake] block from .streamlit/secrets.toml into the Secrets box.
+    push to GitHub and connect the repo at share.streamlit.io. Leave the
+    Secrets box empty to serve the snapshot; paste the [snowflake] block from
+    .streamlit/secrets.toml to go live.
 """
 
 from __future__ import annotations
 
+import json
 import os
+import re
+from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
@@ -37,36 +54,46 @@ DATABASE = os.environ.get("SNOWFLAKE_DATABASE", "ECOMMERCE_DEV")
 MART = f"{DATABASE}.DBT_MART"
 STAGING = f"{DATABASE}.DBT_STAGING"
 
+SNAPSHOT_DIR = Path(__file__).resolve().parents[1] / "data" / "marts"
+
 
 # ---------------------------------------------------------------------------
-# Connection
+# Which source
 #
-# Credentials come from st.secrets locally and from the Secrets box on
-# Streamlit Cloud. If they are missing the app says so plainly rather than
-# falling back to hardcoded figures — a dashboard showing stale numbers it
-# claims are live is worse than one that admits it cannot connect.
+# Reading st.secrets raises rather than returning empty when no secrets file
+# exists at all, so the check has to be defensive. Absent credentials are a
+# normal state here, not an error: it is how the public deployment runs.
+# ---------------------------------------------------------------------------
+
+def _have_credentials() -> bool:
+    try:
+        return "snowflake" in st.secrets
+    except Exception:
+        return False
+
+
+LIVE = _have_credentials()
+SOURCE = "snowflake" if LIVE else "snapshot"
+
+
+# ---------------------------------------------------------------------------
+# Data access
+#
+# Both paths return a frame with lower-case column names, because Snowflake
+# returns identifiers upper-cased and the charts should not have to care which
+# source they were handed.
 # ---------------------------------------------------------------------------
 
 @st.cache_resource
 def get_connection():
     import snowflake.connector
 
-    try:
-        creds = dict(st.secrets["snowflake"])
-    except (KeyError, FileNotFoundError):
-        st.error(
-            "**No Snowflake credentials found.**\n\n"
-            "Create `.streamlit/secrets.toml` from the template in this repo, "
-            "or add the `[snowflake]` block to the Secrets box on Streamlit Cloud."
-        )
-        st.stop()
-
-    return snowflake.connector.connect(**creds)
+    return snowflake.connector.connect(**dict(st.secrets["snowflake"]))
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def q(sql: str) -> pd.DataFrame:
-    """Run a query and return a dataframe with lower-case column names."""
+    """Run a query against Snowflake."""
     cur = get_connection().cursor()
     try:
         cur.execute(sql)
@@ -77,25 +104,109 @@ def q(sql: str) -> pd.DataFrame:
     return df
 
 
+@st.cache_data(show_spinner=False)
+def load_mart(table: str) -> pd.DataFrame:
+    """Read one table from the committed snapshot.
+
+    The CSVs carry the same column names and row order as the Snowflake
+    tables, so no renaming or sorting happens here — if a column name drifts,
+    it should fail loudly in the chart rather than be patched over in the
+    loader.
+    """
+    path = SNAPSHOT_DIR / f"{table}.csv"
+    if not path.exists():
+        st.error(
+            f"**Snapshot table `{table}` is missing.**\n\n"
+            f"Expected `{path}`. Regenerate it with "
+            "`python analysis/build_snapshot.py`, or add Snowflake credentials "
+            "to read the warehouse instead."
+        )
+        st.stop()
+    df = pd.read_csv(path)
+    df.columns = [c.lower() for c in df.columns]
+    return df
+
+
+def fetch(table: str, sql: str, *, lens: str | None = None) -> pd.DataFrame:
+    """One dataset, from whichever source is available.
+
+    `sql` is what runs against the warehouse. On the snapshot path the same
+    table is read from CSV and the same row filter applied, so both paths hand
+    the charts an identically shaped frame.
+
+    Credentials that are present but do not work — an expired trial, a paused
+    warehouse, a rotated password — fall back to the snapshot with a warning
+    rather than showing a stack trace. A public dashboard should degrade, not
+    break, and it should say which happened.
+    """
+    global LIVE
+    if LIVE:
+        try:
+            return q(sql)
+        except Exception as exc:                      # noqa: BLE001 - any failure
+            LIVE = False
+            st.session_state["_connection_error"] = f"{type(exc).__name__}: {exc}"
+    df = load_mart(table)
+    if lens is not None:
+        df = df[df.lens == lens]
+    return df.reset_index(drop=True)
+
+
+_REDACT = [
+    # account identifier and host, e.g. ABCDEFG-HIJ12345.us-east-1.snowflakecomputing.com:443
+    (re.compile(r"[\w.-]*snowflakecomputing\.com(?::\d+)?", re.I), "<account>"),
+    (re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.]+\b"), "<email>"),
+    (re.compile(r"(?i)\buser\s+'[^']*'"), "user '<user>'"),
+]
+
+
+def redact(text: str) -> str:
+    """Strip identifiers out of an error before it is shown.
+
+    This page is public. A connection error is useful diagnostics and is worth
+    showing, but the account identifier, host and user in it are not anyone
+    else's business.
+    """
+    for pattern, replacement in _REDACT:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def connection_warning() -> None:
+    """Shown once, after the first failed query, not before one is attempted."""
+    err = st.session_state.get("_connection_error")
+    if err:
+        st.warning(
+            "**Snowflake credentials are set but the warehouse could not be "
+            "reached.** Serving the committed snapshot instead.\n\n"
+            f"`{redact(err)[:200]}`"
+        )
+
+
+# Model metrics are properties of a fitted model, not of a table, so they
+# cannot come from either query. The snapshot refits on a regenerated feature
+# table and lands slightly differently — same features, same split, marginally
+# different row count. Both are recorded rather than one being presented as
+# though it covered both cases.
+_SNAPSHOT_METRICS = SNAPSHOT_DIR / "model_metrics.json"
+
+
+def model_metrics() -> dict:
+    """Read at the point of use, not at import — the source can change part way
+    through a run if a live connection fails and falls back."""
+    if LIVE or not _SNAPSHOT_METRICS.exists():
+        return {"auc": 0.684, "late_odds": 3.49}   # models/metrics.json, warehouse run
+    m = json.loads(_SNAPSHOT_METRICS.read_text())
+    return {"auc": m["test_roc_auc"], "late_odds": m["odds_ratios"]["is_late"]}
+
+
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
 
 st.title("BrazilCommerce 360")
-st.markdown(
-    "Olist Brazilian marketplace · September 2016 – October 2018 · "
-    "99,441 orders across 96,096 customers"
-)
 
-st.info(
-    "**The lever is the promise, not the parcel.** Orders that miss the promised "
-    "delivery date draw a bad review 54% of the time against 9% for on-time "
-    "orders — a 5.9× difference. Remote states with honest estimates score well; "
-    "closer states with unreliable ones score worst. Because 97% of customers "
-    "never return, that review is the last interaction."
-)
-
-kpis = q(f"""
+kpis = fetch("kpis", f"""
     select
         (select sum(item_price) from {MART}.fact_orders)                    as gmv,
         (select count(distinct order_id) from {MART}.fact_orders)            as orders,
@@ -108,6 +219,23 @@ kpis = q(f"""
                                then pct_of_customers else 0 end), 2)
            from {MART}.mart_retention)                                      as repeat_rate
 """).iloc[0]
+
+connection_warning()
+
+st.markdown(
+    f"Olist Brazilian marketplace · September 2016 – October 2018 · "
+    f"{int(kpis.orders):,} orders with line items across "
+    f"{int(kpis.customers):,} customers · "
+    + ("reading **Snowflake**" if LIVE else "reading the **committed snapshot**")
+)
+
+st.info(
+    "**The lever is the promise, not the parcel.** Orders that miss the promised "
+    "delivery date draw a bad review 54% of the time against 9% for on-time "
+    "orders — a 5.9× difference. Remote states with honest estimates score well; "
+    "closer states with unreliable ones score worst. Because 97% of customers "
+    "never return, that review is the last interaction."
+)
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("GMV", f"R${kpis.gmv / 1e6:.1f}M")
@@ -130,7 +258,7 @@ st.subheader("1 · Growth depends entirely on acquisition")
 left, right = st.columns([2, 1])
 
 with left:
-    ret = q(f"""
+    ret = fetch("mart_retention", f"""
         select order_frequency, customers, pct_of_customers
         from {MART}.mart_retention
         order by order_frequency
@@ -151,9 +279,10 @@ with left:
     st.plotly_chart(fig, use_container_width=True)
 
 with right:
-    st.markdown("#### So what")
+    once = ret.loc[ret.order_frequency == "1 order", "pct_of_customers"].iloc[0]
+    st.markdown("#### Why it matters")
     st.markdown(
-        "**96.88%** of customers ordered exactly once. There is no repeat-purchase "
+        f"**{once:.2f}%** of customers ordered exactly once. There is no repeat-purchase "
         "flywheel to absorb a bad experience.\n\n"
         "**→ Action:** treat the first order as the entire customer relationship. "
         "First-order reliability returns more than any retention campaign, because "
@@ -172,12 +301,12 @@ st.subheader("2 · The promise matters more than the clock")
 left, right = st.columns(2)
 
 with left:
-    speed = q(f"""
+    speed = fetch("mart_delivery_satisfaction", f"""
         select bucket, orders, avg_review_score, pct_bad_review
         from {MART}.mart_delivery_satisfaction
         where lens = 'speed'
         order by bucket_order
-    """)
+    """, lens="speed")
 
     fig = go.Figure(go.Bar(
         x=speed.bucket, y=speed.avg_review_score,
@@ -197,12 +326,12 @@ with left:
     st.caption("Satisfaction erodes gradually, then falls sharply past three weeks.")
 
 with right:
-    promise = q(f"""
+    promise = fetch("mart_delivery_satisfaction", f"""
         select bucket, orders, avg_review_score, pct_bad_review
         from {MART}.mart_delivery_satisfaction
         where lens = 'promise'
         order by bucket_order
-    """)
+    """, lens="promise")
 
     fig = go.Figure(go.Bar(
         x=promise.bucket, y=promise.avg_review_score,
@@ -225,7 +354,7 @@ late = promise[promise.bucket.str.startswith("Late")].iloc[0]
 ontime = promise[~promise.bucket.str.startswith("Late")].iloc[0]
 
 st.info(
-    f"**So what:** Olist already pads its estimates, and it works — {int(ontime.orders):,} "
+    f"**Why it matters:** Olist already pads its estimates, and it works — {int(ontime.orders):,} "
     f"orders beat the quoted date and average {ontime.avg_review_score:.2f}★. The damage sits "
     f"in the {int(late.orders):,} that miss an already-generous estimate: "
     f"**{late.pct_bad_review:.1f}% draw a bad review against {ontime.pct_bad_review:.1f}%**.\n\n"
@@ -242,7 +371,7 @@ st.divider()
 
 st.subheader("3 · Remote is fine; unpredictable is not")
 
-geo = q(f"""
+geo = fetch("mart_geographic_chain", f"""
     select state, orders, avg_delivery_days, avg_review_score,
            pct_late_vs_promise, customers, sellers
     from {MART}.mart_geographic_chain
@@ -275,14 +404,42 @@ fig.update_traces(
 fig.update_layout(height=460, margin=dict(t=20, b=20))
 st.plotly_chart(fig, use_container_width=True)
 
+# Named rather than coded, so the caption reads as a sentence. Derived from the
+# frame rather than typed in, so it cannot drift from the chart beside it.
+STATE_NAMES = {
+    "AC": "Acre", "AL": "Alagoas", "AM": "Amazonas", "AP": "Amapá", "BA": "Bahia",
+    "CE": "Ceará", "DF": "Distrito Federal", "ES": "Espírito Santo", "GO": "Goiás",
+    "MA": "Maranhão", "MG": "Minas Gerais", "MS": "Mato Grosso do Sul",
+    "MT": "Mato Grosso", "PA": "Pará", "PB": "Paraíba", "PE": "Pernambuco",
+    "PI": "Piauí", "PR": "Paraná", "RJ": "Rio de Janeiro",
+    "RN": "Rio Grande do Norte", "RO": "Rondônia", "RR": "Roraima",
+    "RS": "Rio Grande do Sul", "SC": "Santa Catarina", "SE": "Sergipe",
+    "SP": "São Paulo", "TO": "Tocantins",
+}
+
+
+def state_name(code: str) -> str:
+    return STATE_NAMES.get(str(code), str(code))
+
+
+_slowest = geo.sort_values("avg_delivery_days", ascending=False).iloc[0]
+_worst = geo.sort_values("avg_review_score").iloc[0]
+_latest = ", ".join(
+    state_name(s) for s in
+    geo.sort_values("pct_late_vs_promise", ascending=False).state.head(3))
+
 st.info(
-    "**So what:** the colour, not the position, tells the story. Amapá is the slowest state "
-    "in the country at 27 days and still scores 4.24★, because only 4.5% of its orders arrive "
-    "late. Alagoas is *faster* and scores worst at 3.86★, because 23% miss the promise. "
-    "Distance is survivable when the estimate is honest.\n\n"
-    "**→ Action:** recalibrate delivery estimates per state from observed performance rather "
-    "than a national default. For Alagoas, Sergipe and Pará this is a pricing-page change, not "
-    "a logistics investment."
+    f"**Why it matters:** the colour, not the position, tells the story. "
+    f"{state_name(_slowest.state)} is the slowest state in the country at "
+    f"{_slowest.avg_delivery_days:.0f} days and still scores "
+    f"{_slowest.avg_review_score:.2f}★, because only {_slowest.pct_late_vs_promise:.1f}% "
+    f"of its orders arrive late. {state_name(_worst.state)} is *faster* at "
+    f"{_worst.avg_delivery_days:.0f} days and scores worst at "
+    f"{_worst.avg_review_score:.2f}★, because {_worst.pct_late_vs_promise:.0f}% miss the "
+    "promise. Distance is survivable when the estimate is honest.\n\n"
+    "**→ Action:** recalibrate delivery estimates per state from observed performance "
+    f"rather than a national default. For {_latest} this is a pricing-page change, not a "
+    "logistics investment."
 )
 
 st.divider()
@@ -297,7 +454,7 @@ st.subheader("4 · Value is concentrated, but not through loyalty")
 left, right = st.columns([2, 1])
 
 with left:
-    seg = q(f"""
+    seg = fetch("mart_customer_segments", f"""
         select value_tier, customers, avg_spend, pct_of_revenue, avg_orders
         from {MART}.mart_customer_segments
     """)
@@ -326,7 +483,7 @@ with left:
     st.caption("Revenue share varies widely across tiers. Orders per customer does not.")
 
 with right:
-    st.markdown("#### So what")
+    st.markdown("#### Why it matters")
     st.markdown(
         "The top 11% of customers generate **41.2%** of revenue — but average orders per "
         "customer is 1.09 in the top 1% and 1.01 in the bottom half. High-value customers "
@@ -347,7 +504,7 @@ st.subheader("5 · The average review score is a misleading KPI")
 left, right = st.columns([2, 1])
 
 with left:
-    dist = q(f"""
+    dist = fetch("mart_review_distribution", f"""
         select review_score, reviews, pct_of_reviews
         from {MART}.mart_review_distribution
         order by review_score
@@ -368,7 +525,7 @@ with left:
     st.plotly_chart(fig, use_container_width=True)
 
 with right:
-    st.markdown("#### So what")
+    st.markdown("#### Why it matters")
     st.markdown(
         "The distribution is bimodal and non-monotonic: **1-star reviews outnumber "
         "2-star and 3-star combined**. Only 30.7% of reviews land anywhere in the "
@@ -387,7 +544,7 @@ st.divider()
 
 st.subheader("Flagging bad reviews before they happen")
 
-risk = q(f"""
+risk = fetch("review_risk_buckets", f"""
     select risk_bucket, count(*) as orders,
            round(avg(risk_probability) * 100, 1) as avg_predicted_pct
     from {MART}.review_risk_scores
@@ -416,19 +573,22 @@ with left:
     st.plotly_chart(fig, use_container_width=True)
     st.caption(
         "Logistic regression on delivery lateness, duration and freight burden. "
-        "Test ROC AUC 0.684 against a 12.8% base rate."
+        f"Test ROC AUC {model_metrics()['auc']:.3f} against a 12.8% base rate."
     )
 
 with right:
-    st.markdown("#### So what")
+    _vh = risk[risk.risk_bucket.astype(str) == "Very High"]
+    _vh_orders = int(_vh.orders.iloc[0]) if len(_vh) else 0
+
+    st.markdown("#### Why it matters")
     st.markdown(
-        "Lateness dominates the model at **3.49× odds**; the other features sit near "
-        "neutral. It is not slowness that predicts a bad review, it is a missed "
-        "commitment.\n\n"
-        "The **Very High** bucket holds ~8,200 orders where **52% actually leave a bad "
-        "review** — four times the base rate.\n\n"
+        f"Lateness dominates the model at **{model_metrics()['late_odds']:.2f}× odds**; the other "
+        "features sit near neutral. It is not slowness that predicts a bad review, it is "
+        "a missed commitment.\n\n"
+        f"The **Very High** bucket holds {_vh_orders:,} orders where **52% actually leave "
+        "a bad review** — four times the base rate.\n\n"
         "**→ Action:** trigger outreach on that bucket before the review request is sent. "
-        "At 8,200 orders the volume is operationally tractable."
+        f"At {_vh_orders:,} orders the volume is operationally tractable."
     )
 
 st.divider()
@@ -438,8 +598,27 @@ st.divider()
 # Footer — freshness and reconciliation
 # ---------------------------------------------------------------------------
 
-with st.expander("Data freshness and pipeline reconciliation"):
-    meta = q(f"""
+with st.expander("Data source, freshness and pipeline reconciliation"):
+    if LIVE:
+        st.markdown(
+            "Reading **Snowflake** directly. Every figure above is the result of the "
+            "query shown in `streamlit/app.py`, run against the dbt marts."
+        )
+    else:
+        st.markdown(
+            "Reading the **committed snapshot** in `data/marts/`. No warehouse "
+            "credentials are present, which is how the public deployment runs.\n\n"
+            "The snapshot is *regenerated* from the raw Olist CSVs by "
+            "`analysis/build_snapshot.py`, a pandas re-implementation of the same dbt "
+            "models — not exported from Snowflake. The marts agree with the warehouse "
+            "run on the figures that carry the findings; `data/marts/README.md` records "
+            "where they do not. Add credentials and the identical charts read the "
+            "warehouse instead."
+        )
+
+    st.divider()
+
+    meta = fetch("meta", f"""
         select
             (select max(purchased_at) from {MART}.fact_orders)               as latest_order,
             (select count(distinct order_id) from {DATABASE}.raw.raw_orders) as raw_orders,

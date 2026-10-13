@@ -173,13 +173,20 @@ models:
 
   - name: stg_order_reviews
     description: >
-      One row per review, deduplicated on review_id . Reviews created
-      before delivery are retained deliberately .
+      One row per (review_id, order_id). review_id is not a primary key on its
+      own — 789 of them attach to more than one order. Reviews created before
+      delivery are retained deliberately .
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - review_id
+            - order_id
     columns:
       - name: review_id
-        description: Primary key after deduplication.
+        description: >
+          Not unique on its own; the grain is the pair with order_id, tested at
+          model level above.
         tests:
-          - unique
           - not_null
       - name: order_id
         tests:

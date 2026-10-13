@@ -1,4 +1,6 @@
-streamlit>=1.30
-snowflake-connector-python[pandas]>=3.0
-pandas>=2.0
-plotly>=5.18
+streamlit
+pandas
+plotly
+# Only imported when [snowflake] credentials are present. Harmless to install
+# for the snapshot-only deployment; required the moment you go live again.
+snowflake-connector-python
