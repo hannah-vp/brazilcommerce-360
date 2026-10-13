@@ -1,0 +1,12 @@
+{
+  "rows": 96353,
+  "base_rate_pct": 12.8,
+  "test_roc_auc": 0.697,
+  "test_avg_precision": 0.403,
+  "odds_ratios": {
+    "delivery_days": 1.037,
+    "is_late": 3.49,
+    "days_late": 1.065,
+    "freight_ratio": 1.034
+  }
+}

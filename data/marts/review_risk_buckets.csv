@@ -1,0 +1,4 @@
+risk_bucket,orders,avg_predicted_pct
+Medium,48871,36.6
+High,39316,45.1
+Very High,8166,84.7

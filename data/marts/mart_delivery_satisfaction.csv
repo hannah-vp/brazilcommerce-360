@@ -1,0 +1,7 @@
+lens,bucket,bucket_order,orders,avg_review_score,avg_delivery_days,pct_bad_review
+speed,1-7 days,1,30679.0,4.41,5.0,7.6
+speed,8-14 days,2,37985.0,4.3,10.6,9.1
+speed,15-21 days,3,16170.0,4.12,17.5,12.2
+speed,22+ days,4,11519.0,3.06,31.3,39.9
+promise,On time or early,1,88653.0,4.29,13.7,9.2
+promise,Late vs promise,2,7700.0,2.57,-8.8,54.0
